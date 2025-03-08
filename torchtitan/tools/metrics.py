@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchtitan.config_manager import JobConfig
 from torchtitan.distributed import ParallelDims
 from torchtitan.tools.logging import logger
-from torchtitan.tools.utils import device_module, device_type
+from torchtitan.tools.utils import Color, device_module, device_type
 
 # named tuple for passing device memory stats for logging
 DeviceMemStats = namedtuple(
@@ -56,16 +56,16 @@ class DeviceMemoryMonitor:
     def get_peak_stats(self):
         device_info = device_module.memory_stats(self.device)
 
-        max_active = device_info["active_bytes.all.peak"]
+        max_active = device_info.get("active_bytes.all.peak", -1)
         max_active_gib = self._to_gib(max_active)
         max_active_pct = self._to_pct(max_active)
 
-        max_reserved = device_info["reserved_bytes.all.peak"]
+        max_reserved = device_info.get("reserved_bytes.all.peak", -1)
         max_reserved_gib = self._to_gib(max_reserved)
         max_reserved_pct = self._to_pct(max_reserved)
 
-        num_retries = device_info["num_alloc_retries"]
-        num_ooms = device_info["num_ooms"]
+        num_retries = device_info.get("num_alloc_retries", -1)
+        num_ooms = device_info.get("num_ooms", -1)
 
         if num_retries > 0:
             logger.warning(
@@ -154,18 +154,63 @@ class WandBLogger(BaseLogger):
             self.wandb.finish()
 
 
-def _get_metrics_rank(parallel_dims: ParallelDims) -> int:
+def ensure_pp_loss_visible(
+    parallel_dims: ParallelDims, job_config: JobConfig, color: Color
+) -> None:
     """
-    Returns global rank 0 in non-pipeline-parallel configs, and returns the global
-    rank of the 0th rank in the last pipeline stage when pipeline parallelism is enabled.
+    Ensures that the loss is visible on the console for pipeline-parallel training.
+
+    For pipeline-parallel training, the loss is only visible on the last pipeline stage.
+    This function checks if the appropriate rank is included in the LOG_RANK environment
+    variable and warns if it's not.
     """
-    if parallel_dims.pp_enabled:
-        world_size = parallel_dims.world_size
-        pp_size = parallel_dims.pp
-        metrics_log_rank = (world_size // pp_size) * (pp_size - 1)
-    else:
-        metrics_log_rank = 0
-    return metrics_log_rank
+
+    # V Block Schedules return loss on rank 0
+    if job_config.experimental.pipeline_parallel_schedule == "ZBVZeroBubble":
+        return
+
+    # Calculate the rank where loss is visible (first rank of the last pipeline stage)
+    world_size = parallel_dims.world_size
+    pp_size = parallel_dims.pp
+    loss_visible_rank = (world_size // pp_size) * (pp_size - 1)
+
+    # Check if the loss-visible rank is included in LOG_RANK environment variable
+    env_logged_ranks = os.environ.get("LOG_RANK", "").split(",")
+    if env_logged_ranks == [""]:
+        env_logged_ranks = []
+
+    if str(loss_visible_rank) not in env_logged_ranks:
+        logger.warning(
+            f"{color.red}Pipeline parallel loss is not visible. "
+            f"Add {color.yellow}rank {loss_visible_rank}{color.red} to LOG_RANK environment variable in run_train.sh.{color.reset}"
+        )
+
+
+def _get_metrics_rank(
+    parallel_dims: ParallelDims,
+    job_config: JobConfig,
+) -> int:
+    """
+    Determines which rank should log metrics.
+
+    Returns:
+       int: The rank responsible for logging metrics:
+            - Rank 0 for non-pipeline-parallel configs
+            - Rank 0 for pipeline-parallel 'ZBVZeroBubble' schedule
+            - The first rank of the last pipeline stage for other pipeline-parallel schedules
+    """
+    # Early return for non-pipeline-parallel configurations
+    if not parallel_dims.pp_enabled:
+        return 0
+
+    # V Block Schedules return loss on rank 0
+    if job_config.experimental.pipeline_parallel_schedule == "ZBVZeroBubble":
+        return 0
+
+    # Calculate first rank of the last pipeline stage
+    world_size = parallel_dims.world_size
+    pp_size = parallel_dims.pp
+    return (world_size // pp_size) * (pp_size - 1)
 
 
 def build_metric_logger(
@@ -190,7 +235,7 @@ def build_metric_logger(
     # Determine if this rank should log
     should_log = has_logging_enabled
     if metrics_config.rank_0_only and should_log:
-        metrics_rank = _get_metrics_rank(parallel_dims)
+        metrics_rank = _get_metrics_rank(parallel_dims, job_config)
         should_log = torch.distributed.get_rank() == metrics_rank
 
     logger.debug(

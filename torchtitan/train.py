@@ -21,7 +21,11 @@ from torchtitan.protocols.train_spec import get_train_spec
 
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
-from torchtitan.tools.metrics import build_device_memory_monitor, build_metric_logger
+from torchtitan.tools.metrics import (
+    build_device_memory_monitor,
+    build_metric_logger,
+    ensure_pp_loss_visible,
+)
 from torchtitan.tools.profiling import (
     maybe_enable_memory_snapshot,
     maybe_enable_profiling,
@@ -185,6 +189,10 @@ def main(job_config: JobConfig):
             with torch.no_grad():
                 m.init_weights(buffer_device=buffer_device)
             m.train()
+
+        # confirm that user will be able to view loss metrics on the console
+        ensure_pp_loss_visible(parallel_dims, job_config, color)
+
     else:
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
         train_spec.parallelize_fn(model, world_mesh, parallel_dims, job_config)
@@ -242,7 +250,7 @@ def main(job_config: JobConfig):
     # plot losses loaded from checkpoint (if any) to TensorBoard
     # NOTE: Loss info after the last log step before checkpoint saving will not be ploted.
     #       This can be avoided by setting checkpoint.interval to be a multiple of metrics.log_freq
-    if train_state.step > 0:
+    if train_state.step > 0 and not job_config.metrics.disable_logging_from_checkpoint:
         for idx, step in enumerate(train_state.log_steps):
             metrics = {
                 "loss_metrics/global_avg_loss": train_state.global_avg_losses[idx],

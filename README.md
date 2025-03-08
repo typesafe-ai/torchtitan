@@ -58,7 +58,7 @@ We report [performance](docs/performance.md) on up to 512 GPUs, and verify [loss
 ### Dive into the code
 
 You may want to see how the model is defined or how parallelism techniques are applied. For a guided tour, see these files first:
-* [train.py](train.py) - the main training loop and high-level setup code
+* [torchtitan/train.py](torchtitan/train.py) - the main training loop and high-level setup code
 * [torchtitan/models/llama/model.py](torchtitan/models/llama/model.py) - the Llama 3.1 model definition
 * [torchtitan/models/llama/parallelize_llama.py](torchtitan/models/llama/parallelize_llama.py) - helpers for applying Data Parallel, Tensor Parallel, activation checkpointing, and `torch.compile` to the model
 * [torchtitan/models/llama/pipeline_llama.py](torchtitan/models/llama/pipeline_llama.py) - helpers for applying Pipeline Parallel to the model
@@ -131,4 +131,4 @@ We provide a detailed look into the parallelisms and optimizations available in 
 
 ## License
 
-This code is made available under [BSD 3 license](./LICENSE). However you may have other legal obligations that govern your use of other content, such as the terms of service for third-party models, data, etc.
+Source code is made available under a [BSD 3 license](./LICENSE), however you may have other legal obligations that govern your use of other content linked in this repository, such as the license or terms of service for third-party data and models.

@@ -166,6 +166,13 @@ class JobConfig:
             """,
         )
         self.parser.add_argument(
+            "--metrics.disable_logging_from_checkpoint",
+            action="store_true",
+            help="""
+                Whether to log metrics from scratch for each checkpoint load. We have seen this feature
+                leading to nccl watchdog timeout issue when testing with tb. This flag disables it.""",
+        )
+        self.parser.add_argument(
             "--metrics.enable_wandb",
             action="store_true",
             help="Whether to log metrics to Weights & Biases",
@@ -225,6 +232,9 @@ class JobConfig:
         )
         self.parser.add_argument(
             "--optimizer.lr", type=float, default=8e-4, help="Learning rate to use"
+        )
+        self.parser.add_argument(
+            "--optimizer.eps", type=float, default=1e-8, help="Epsilon value to use"
         )
         self.parser.add_argument(
             "--optimizer.implementation",
@@ -571,11 +581,12 @@ class JobConfig:
         self.parser.add_argument(
             "--checkpoint.keep_latest_k",
             type=int,
-            default=0,
+            default=10,
             help="""
                 Keeps only the latest k checkpoints, and purging older ones. If 0, keep all checkpoints.
-                0 is the default value. k cannot be 1 as the last one may be in the process of being
-                saved. As a result, the metadata of the last one may not be ready yet.
+                K cannot be 1 as the last one may be in the process of being saved. As a result,
+                the metadata of the last one may not be ready yet. The default value is 10 to avoid
+                filling up the disk.
             """,
         )
         self.parser.add_argument(

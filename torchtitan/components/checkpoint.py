@@ -302,12 +302,6 @@ class CheckpointManager:
         self.cpu_offload_state_dict = None
         self.staging_stream = torch.cuda.Stream() if self.enable_staging else None
 
-        self.staging = False
-        self.sending_to_checkpoint_mp = False
-        self.staging_id = None
-        self.cpu_offload_state_dict = None
-        self.staging_stream = torch.cuda.Stream() if self.enable_staging else None
-
         self.folder = os.path.join(job_config.job.dump_folder, ckpt_config.folder)
         self.interval = ckpt_config.interval
         async_mode = ckpt_config.async_mode.lower()
@@ -457,7 +451,7 @@ class CheckpointManager:
 
         logger.info(f"Loading the checkpoint at step {step}.")
         begin = time.monotonic()
-        states = self._states_to_load(checkpoint_id)
+        states = self._states_to_load(step)
         dcp.load(states, checkpoint_id=checkpoint_id)
         GarbageCollection.collect("GC collection for checkpoint loading.")
         logger.info(
@@ -615,6 +609,11 @@ class CheckpointManager:
     def _should_save(self, curr_step: int, force: bool = False) -> bool:
         if not self.enable_checkpoint:
             return False
+
+        # Force saving a checkpoint at step 1 to fail fast if checkpointer is not
+        # compatible with the cluster.
+        if curr_step == 1:
+            return True
 
         if force:
             return True
